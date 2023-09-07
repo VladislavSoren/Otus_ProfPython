@@ -28,14 +28,16 @@ class countcalls:
     '''Decorator that counts calls made to the function decorated.'''
 
     def __init__(self, function):
-        self.count = 0
+        print('init_countcalls')
+        self.calls = 0
         self.function = function
 
     def __call__(self, *args, **kwargs):
-        self.count += 1
-        print(self.count)
-        value = self.function(*args, **kwargs)
-        return value
+        self.calls += 1
+        self.value = self.function(*args, **kwargs)
+        return self
+
+
 
 
 class memo:
@@ -47,6 +49,7 @@ class memo:
     '''
 
     def __init__(self, function):
+        print('init_memo')
         self.cache = {}
         self.function = function
 
@@ -129,19 +132,19 @@ def fib(n):
 
 
 def main():
-    print(foo(4, 3))
-    print(foo(4, 3, 2))
-    print(foo(4, 3))
+    # print(foo(4, 3))
+    # print(foo(4, 3, 2))
+    # print(foo(4, 3))
     # print("foo was called", foo.calls, "times")
 
     print(bar(4, 3))
     print(bar(4, 3, 2))
     print(bar(4, 3, 2, 1))
-    # print("bar was called", bar.calls, "times")
+    print("bar was called", bar.calls, "times")
 
     print(fib.__doc__)
     fib(3)
-    # print(fib.calls, 'calls made')
+    print(fib.calls, 'calls made')
 
 
 if __name__ == '__main__':
