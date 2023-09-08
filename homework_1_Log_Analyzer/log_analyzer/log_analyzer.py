@@ -2,11 +2,16 @@
 # -*- coding: utf-8 -*-
 import bz2
 import datetime
+import logging
 import os
 import gzip
+import sys
+import time
+from functools import wraps
 from pathlib import Path
 from string import Template
 import re
+import argparse
 
 # log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
 #                     '$status $body_bytes_sent "$http_referer" '
@@ -16,8 +21,56 @@ import re
 config = {
     "REPORT_SIZE": 1000,
     "REPORT_DIR": "./reports",
-    "LOG_DIR": "./log"
+    "LOG_DIR": "./log",
+    'line_log_format': re.compile(
+        r"""(?P<ipaddress>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) (?P<remote_user>(-|\S+))  - \[(?P<dateandtime>\d{2}\/[a-z]{3}\/\d{4}:\d{2}:\d{2}:\d{2} (\+|\-)\d{4})\] (\"(GET|POST) )(?P<url>.+)(http\/[1-2]\.[0-9]") (?P<statuscode>\d{3}) (?P<bytessent>\d+) (?P<refferer>-|"([^"]+)") (["](?P<useragent>[^"]+)["]) (?P<forwarded_for>"([^"]+)") (?P<request_id>"([^"]+)") (?P<rb_user>"([^"]+)") (?P<request_time>\d+\.\d{3})""",
+        re.IGNORECASE),
+    'parsing_error_limit_perc': 10,
+    'progress_inform_mode': True,
 }
+
+'''
+To Do List:
+    - Сделать возможность передать путь к конфигу через --config командной строки
+    * У пути конфига должно быть дефолтное значение. Если файл не существует или не парсится, нужно выходить сошибкой.
+    
+    - Путьдо логфайла указывается в конфиге, если не указан, лог должен писаться вstdout (filename = None)
+    
+    - Написать MVP тестов (fast mode)
+'''
+
+
+# Параметры логирования
+log_path = Path('logs_report') / "py_log.log"
+logging.basicConfig(filename=str(log_path),
+                    # if filename == None -> logs in stdout
+                    filemode="w",
+                    format='[%(asctime)s] %(levelname).1s %(message)s',
+                    datefmt='%Y.%m.%d%H:%M:%S',
+                    level=logging.INFO)
+parsing_logger = logging.getLogger(__name__)
+
+
+class Status:
+    success = 'Success'
+    failed = 'Failed'
+
+
+def log_time(logger, description=''):
+    def inner(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            logger.info(f'Start {description} ({func.__name__})')
+            result = func(*args, **kwargs)
+            end = time.time()
+            exec_time = round(end - start, 2)
+            logger.info(f'Time {description} ({func.__name__}): {exec_time}s')
+            return result
+
+        return wrapper
+
+    return inner
 
 
 def get_time_str(value):
@@ -31,52 +84,84 @@ def get_time_str_in_proper_format(value):
     return time_str_proper
 
 
+# Получаем имя файла с самой свежей датой
+def get_log_file_name_last(config_file):
+    log_file_names = os.listdir(config_file['LOG_DIR'])
+    log_file_name_last = max(log_file_names, key=get_time_str)
+    return log_file_name_last
+
+
 def sort_condition(url_stat_dict):
     return url_stat_dict['time_sum']
 
 
-def main():
-    # Получаем имя файла с самой свежей датой
-    log_file_names = os.listdir(config['LOG_DIR'])
-    log_file_name_last = max(log_file_names, key=get_time_str)
-
-    # Получаем дату из имени файла в формате "2017.06.30"
-    file_time = get_time_str_in_proper_format(log_file_name_last)
-
-    # Чтение логфайла
-    path_log_file = str(Path('log') / log_file_name_last)
+def get_logfile_object(path_log_file):
     if path_log_file.endswith(".gz"):
         logfile = gzip.open(path_log_file)
     elif path_log_file.endswith(".bz2"):
         logfile = bz2.BZ2File(path_log_file)
     else:
-        logfile = open(path_log_file)
+        logfile = open(path_log_file, 'rb')
 
-    # Парсинг логов
-    lineformat = re.compile(
-        r"""(?P<ipaddress>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) -  - \[(?P<dateandtime>\d{2}\/[a-z]{3}\/\d{4}:\d{2}:\d{2}:\d{2} (\+|\-)\d{4})\] (\"(GET|POST) )(?P<url>.+)(http\/[1-2]\.[0-9]") (?P<statuscode>\d{3}) (?P<bytessent>\d+) (?P<refferer>-|"([^"]+)") (["](?P<useragent>[^"]+)["]) (?P<forwarded_for>"([^"]+)") (?P<request_id>"([^"]+)") (?P<rb_user>"([^"]+)") (?P<request_time>\d+\.\d{3})""",
-        re.IGNORECASE)
+    return logfile
 
+
+@log_time(logger=parsing_logger)
+def count_lines(path_log_file):
+    logfile = get_logfile_object(path_log_file)
+    num_lines = sum(1 for _ in logfile)
+    return num_lines
+
+
+def progress_inform(done_perc, done_perc_flags):
+    for perc_point, done_flag in done_perc_flags.items():
+        if done_perc > perc_point and not done_flag:
+            done_perc_flags[perc_point] = True
+            print(f'{perc_point}% done')
+
+
+# парсинг логов
+@log_time(logger=parsing_logger)
+def parsing_logs(path_log_file, config_file):
+    num_lines = count_lines(path_log_file)
     urls_list = []
     requests_time_list = []
-    success_count = 0
-    fail_count = 0
-    #! можно прикрутить сюда генератор
-    for row_bytes in logfile.readlines():
+    status_counters = {
+        'success_count': 0,
+        'fail_count': 0,
+    }
+    done_perc_flags = {
+        10: False, 20: False, 30: False, 40: False, 50: False,
+        60: False, 70: False, 80: False, 90: False
+    }
+
+    logfile = get_logfile_object(path_log_file)
+
+    parsing_logger.info(f'Parsing is started')
+    for row_bytes in logfile:
         row_str = row_bytes.decode('utf-8')
 
-        data = re.search(lineformat, row_str)
+        data = re.search(config_file['line_log_format'], row_str)
         if data:
-            success_count += 1
+            status_counters['success_count'] += 1
             datadict = data.groupdict()
             urls_list.append(datadict["url"])
             requests_time_list.append(float(datadict["request_time"]))
         else:
-            fail_count += 1
+            status_counters['fail_count'] += 1
+            parsing_logger.error(f'Parsing error for row: {row_str}')
+
+        # progress inform
+        if config_file['progress_inform_mode']:
+            done_perc = ((status_counters['success_count'] + status_counters['fail_count']) / num_lines) * 100
+            progress_inform(done_perc, done_perc_flags)
 
     logfile.close()
+    parsing_logger.info(f'Parsing is finished')
+    return urls_list, requests_time_list, status_counters
 
-    # Группируем урлы
+
+def get_grouped_urls_dict(urls_list, requests_time_list):
     urls_dict = {}
     requests_time_list = [float(i) for i in requests_time_list]
     for url, request_time in zip(urls_list, requests_time_list):
@@ -86,37 +171,47 @@ def main():
             urls_dict[url] = list([])
 
         urls_dict[url] += [request_time]
+    return urls_dict
 
-    # Расчёт статистик для отчёта
+
+@log_time(logger=parsing_logger)
+def get_table_json_stat(urls_dict, requests_time_list):
     all_requests_count = len(requests_time_list)
     all_requests_sum = sum(requests_time_list)
     table_json = []
     for url, request_times_list in urls_dict.items():
         row_json = {
             'url': url,
-            'count': len(request_times_list),
-            'count_perc': (len(request_times_list) / all_requests_count) * 100,
-            'time_sum': sum(request_times_list),
-            'time_perc': (sum(request_times_list) / all_requests_sum) * 100,
-            'time_avg': sum(request_times_list) / len(request_times_list),
-            'time_max': max(request_times_list),
-            'time_med': sorted(request_times_list)[0],
+            'count': round(len(request_times_list), 3),
+            'count_perc': round(((len(request_times_list) / all_requests_count) * 100), 3),
+            'time_sum': round(sum(request_times_list), 3),
+            'time_perc': round(((sum(request_times_list) / all_requests_sum) * 100), 3),
+            'time_avg': round((sum(request_times_list) / len(request_times_list)), 3),
+            'time_max': round(max(request_times_list), 3),
+            'time_med': round(sorted(request_times_list)[0], 3),
         }
         table_json.append(row_json)
 
-    # сортировка словарей в списке по time_sum
-    table_json = sorted(table_json, key=sort_condition, reverse=True)
-    table_json = table_json[:config['REPORT_SIZE']]
+    return table_json
 
-    # Подгрузка report шаблона
+
+def get_formatted_report(table_json, config_file):
+    table_json = sorted(table_json, key=sort_condition, reverse=True)
+    table_json = table_json[:config_file['REPORT_SIZE']]
+
+    return table_json
+
+
+@log_time(logger=parsing_logger)
+def save_report(table_json, file_time) -> None:
+    # Получаем шаблон
     path_report_base_file = str(Path('reports') / 'report.html')
     with open(path_report_base_file, 'r') as f:
         report_base_content = f.read()
 
-    # подмена table_json в шаблоне
+    # Подменяем table_json в шаблоне
     default_template = Template(report_base_content)
     report_new = default_template.safe_substitute({'table_json': table_json})
-    pass
 
     # Сохраняем report
     path_report_base_file = str(Path('reports') / f'report-{file_time}.html')
@@ -124,5 +219,47 @@ def main():
         f.write(report_new)
 
 
+def get_fatal_error_status(status_counters, config_file):
+    all_rows_count = status_counters['success_count'] + status_counters['fail_count']
+    fail_perc = (status_counters['fail_count'] / all_rows_count) * 100
+    limit = config_file['parsing_error_limit_perc']
+    if fail_perc > limit:
+        parsing_logger.error(f'Error limit is over, {fail_perc} > {limit}')
+        return Status.failed
+    return Status.success
+
+
+@log_time(logger=parsing_logger)
+def main(config_file):
+    log_file_name_last = get_log_file_name_last(config_file)
+
+    # Получаем дату из имени файла в формате "2017.06.30"
+    file_time = get_time_str_in_proper_format(log_file_name_last)
+
+    # Получаем данные для формирования отчёта и счётчики качества парсинга
+    path_log_file = str(Path(config_file['LOG_DIR']) / log_file_name_last)
+    urls_list, requests_time_list, status_counters = parsing_logs(path_log_file, config_file)
+
+    status = get_fatal_error_status(status_counters, config_file)
+    if status == Status.failed:
+        parsing_logger.error(f'Program is stopped due to fatal error!')
+        sys.exit()
+
+    # Группируем урлы
+    urls_dict = get_grouped_urls_dict(urls_list, requests_time_list)
+
+    # Получение полного статистического отчёта
+    table_json = get_table_json_stat(urls_dict, requests_time_list)
+
+    # Получение отчёта, приведённого к нужному формату (готовый отчёт)
+    table_json = get_formatted_report(table_json, config_file)
+
+    # Сохранение отчёта
+    save_report(table_json, file_time)
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main(config)
+    except Exception as e:
+        logging.exception(f'Неожиданная ошибка {e}')
