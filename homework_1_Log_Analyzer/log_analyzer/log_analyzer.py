@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import bz2
 import datetime
+import json
 import logging
 import os
 import gzip
@@ -13,36 +14,54 @@ from string import Template
 import re
 import argparse
 
-# log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
-#                     '$status $body_bytes_sent "$http_referer" '
-#                     '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '  
-#                     '$request_time';
+path = sys.path
+cur_work_dir = os.getcwd()
 
+"""
+####### Структура логов файла #######
+log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '  
+                    '$request_time';
+"""
+
+# Парсим данные командной строки
+parser = argparse.ArgumentParser(description='Log parser')
+parser.add_argument(
+    '--config',
+    type=str,
+    default='config.json',
+    help='Enter path of config file'
+)
+args = parser.parse_args()
+
+# Подгружаем внешний конфиг
+with open(args.config, encoding='utf-8') as f:
+    loaded_config = json.load(f)
+
+# конфиг по умолчанию
 config = {
     "REPORT_SIZE": 1000,
     "REPORT_DIR": "./reports",
     "LOG_DIR": "./log",
-    'line_log_format': re.compile(
+    "line_log_format": re.compile(
         r"""(?P<ipaddress>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) (?P<remote_user>(-|\S+))  - \[(?P<dateandtime>\d{2}\/[a-z]{3}\/\d{4}:\d{2}:\d{2}:\d{2} (\+|\-)\d{4})\] (\"(GET|POST) )(?P<url>.+)(http\/[1-2]\.[0-9]") (?P<statuscode>\d{3}) (?P<bytessent>\d+) (?P<refferer>-|"([^"]+)") (["](?P<useragent>[^"]+)["]) (?P<forwarded_for>"([^"]+)") (?P<request_id>"([^"]+)") (?P<rb_user>"([^"]+)") (?P<request_time>\d+\.\d{3})""",
         re.IGNORECASE),
-    'parsing_error_limit_perc': 10,
-    'progress_inform_mode': True,
+    "parsing_error_limit_perc": 10,
+    "progress_inform_mode": 1,
+    "logs_report_path": str(Path('logs_report') / "py_log.log"),
+    # "logs_report_path": None,
 }
+# обновляем дефолтный конфиг контентом из подгруженного
+config.update(loaded_config)
 
 '''
-To Do List:
-    - Сделать возможность передать путь к конфигу через --config командной строки
-    * У пути конфига должно быть дефолтное значение. Если файл не существует или не парсится, нужно выходить сошибкой.
-    
-    - Путьдо логфайла указывается в конфиге, если не указан, лог должен писаться вstdout (filename = None)
-    
+To Do List:       
     - Написать MVP тестов (fast mode)
 '''
 
-
 # Параметры логирования
-log_path = Path('logs_report') / "py_log.log"
-logging.basicConfig(filename=str(log_path),
+logging.basicConfig(filename=config.get('logs_report_path', None),
                     # if filename == None -> logs in stdout
                     filemode="w",
                     format='[%(asctime)s] %(levelname).1s %(message)s',
@@ -51,11 +70,13 @@ logging.basicConfig(filename=str(log_path),
 parsing_logger = logging.getLogger(__name__)
 
 
+# Статусы выполнения
 class Status:
     success = 'Success'
     failed = 'Failed'
 
 
+# Декоратор замера времени выполнения функции
 def log_time(logger, description=''):
     def inner(func):
         @wraps(func)
@@ -110,6 +131,7 @@ def get_logfile_object(path_log_file):
 def count_lines(path_log_file):
     logfile = get_logfile_object(path_log_file)
     num_lines = sum(1 for _ in logfile)
+    logfile.close()
     return num_lines
 
 
@@ -243,7 +265,8 @@ def main(config_file):
     status = get_fatal_error_status(status_counters, config_file)
     if status == Status.failed:
         parsing_logger.error(f'Program is stopped due to fatal error!')
-        sys.exit()
+        raise SystemError('Error limit during parsing exceeded')
+        # sys.exit()
 
     # Группируем урлы
     urls_dict = get_grouped_urls_dict(urls_list, requests_time_list)
