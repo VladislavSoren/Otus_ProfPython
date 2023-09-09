@@ -24,21 +24,38 @@ import re
 import argparse
 
 system_paths = sys.path
-cur_work_dir = os.getcwd()
+CWD = os.getcwd()
+print(system_paths)
+print(CWD)
+
+# BASE_PATH = Path(__file__).resolve().parent
+# Если мы запускаемся из данного файла, то CWD в пути будет содержать "log_analyzer"
+if 'log_analyzer' in CWD:
+    BASE_PATH = Path(CWD)
+# Иначе мы запускаемся из другого места и предполагаем, что из корня всего проекта -> выстраиваем базовый путь от него
+else:
+    BASE_PATH = Path(CWD) / 'homework_1_Log_Analyzer' / 'log_analyzer'
 
 # Парсим данные командной строки
 parser = argparse.ArgumentParser(description='Log parser')
 parser.add_argument(
     '--config',
     type=str,
-    default='config.json',
+    default=str(BASE_PATH / "config.json"),
     help='Enter path of config file'
 )
 args = parser.parse_args()
 
 # Подгружаем внешний конфиг
-with open(args.config, encoding='utf-8') as f:
-    loaded_config = json.load(f)
+try:
+    with open(args.config, encoding='utf-8') as f:
+        loaded_config = json.load(f)
+except OSError as e:
+    print(f'Error opening configuration file: {e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'Unexpected error by opening configuration file: {e}')
+    sys.exit(1)
 
 # конфиг по умолчанию
 config = {
@@ -50,7 +67,7 @@ config = {
         re.IGNORECASE),
     "PARSING_ERROR_LIMIT_PERC": 10,
     "PROGRESS_INFORM_MODE": 1,
-    "LOGS_REPORT_PATH": str(Path('logs_report') / "py_log.log"),
+    "LOGS_REPORT_PATH": str(BASE_PATH / 'logs_report' / "py_log.log"),
     # "LOGS_REPORT_PATH": None,
 }
 # обновляем дефолтный конфиг контентом из подгруженного
@@ -113,12 +130,19 @@ def sort_condition(url_stat_dict):
 
 
 def get_logfile_object(path_log_file):
-    if path_log_file.endswith(".gz"):
-        logfile = gzip.open(path_log_file)
-    elif path_log_file.endswith(".bz2"):
-        logfile = bz2.BZ2File(path_log_file)
-    else:
-        logfile = open(path_log_file, 'rb')
+    try:
+        if path_log_file.endswith(".gz"):
+            logfile = gzip.open(path_log_file)
+        elif path_log_file.endswith(".bz2"):
+            logfile = bz2.BZ2File(path_log_file)
+        else:
+            logfile = open(path_log_file, 'rb')
+    except OSError as e:
+        parsing_logger.error(f'Error opening logfile: {e}')
+        sys.exit(1)
+    except Exception as e:
+        parsing_logger.error(f'Unexpected error by opening logfile: {e}')
+        sys.exit(1)
 
     return logfile
 
@@ -179,6 +203,7 @@ def parsing_logs(path_log_file, config_file):
     return urls_list, requests_time_list, status_counters
 
 
+@log_time(logger=parsing_logger)
 def get_grouped_urls_dict(urls_list, requests_time_list):
     urls_dict = {}
     requests_time_list = [float(i) for i in requests_time_list]
@@ -224,8 +249,15 @@ def get_formatted_report(table_json, config_file):
 def save_report(table_json, file_time, config_file) -> None:
     # Получаем шаблон
     path_report_base_file = str(Path(config_file['REPORT_DIR']) / 'report.html')
-    with open(path_report_base_file, 'r') as f:
-        report_base_content = f.read()
+    try:
+        with open(path_report_base_file, 'r') as f:
+            report_base_content = f.read()
+    except OSError as e:
+        parsing_logger.error(f'Error opening report.html: {e}')
+        sys.exit(1)
+    except Exception as e:
+        parsing_logger.error(f'Unexpected error by opening report.html: {e}')
+        sys.exit(1)
 
     # Подменяем table_json в шаблоне
     default_template = Template(report_base_content)
@@ -233,8 +265,15 @@ def save_report(table_json, file_time, config_file) -> None:
 
     # Сохраняем report
     path_report_base_file = str(Path(config_file['REPORT_DIR']) / f'report-{file_time}.html')
-    with open(path_report_base_file, 'w') as f:
-        f.write(report_new)
+    try:
+        with open(path_report_base_file, 'w') as f:
+            f.write(report_new)
+    except OSError as e:
+        parsing_logger.error(f'Error creating new report: {e}')
+        sys.exit(1)
+    except Exception as e:
+        parsing_logger.error(f'Unexpected error by creating new report: {e}')
+        sys.exit(1)
 
 
 def get_fatal_error_status(status_counters, config_file):
@@ -247,7 +286,6 @@ def get_fatal_error_status(status_counters, config_file):
     return Status.success
 
 
-@log_time(logger=parsing_logger)
 def main(config_file):
     log_file_name_last = get_log_file_name_last(config_file)
 
@@ -263,7 +301,7 @@ def main(config_file):
     if status == Status.failed:
         parsing_logger.error(f'Program is stopped due to fatal error!')
         raise SystemError('Error limit during parsing exceeded')
-        # sys.exit()
+        sys.exit()
 
     # Группируем урлы
     urls_dict = get_grouped_urls_dict(urls_list, requests_time_list)
