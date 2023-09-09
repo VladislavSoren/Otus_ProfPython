@@ -1,5 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+
+"""
+####### Структура логов файла #######
+log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '
+                    '$request_time';
+"""
+
 import bz2
 import datetime
 import json
@@ -14,16 +23,8 @@ from string import Template
 import re
 import argparse
 
-path = sys.path
+system_paths = sys.path
 cur_work_dir = os.getcwd()
-
-"""
-####### Структура логов файла #######
-log_format ui_short '$remote_addr  $remote_user $http_x_real_ip [$time_local] "$request" '
-                    '$status $body_bytes_sent "$http_referer" '
-                    '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '  
-                    '$request_time';
-"""
 
 # Парсим данные командной строки
 parser = argparse.ArgumentParser(description='Log parser')
@@ -44,24 +45,19 @@ config = {
     "REPORT_SIZE": 1000,
     "REPORT_DIR": "./reports",
     "LOG_DIR": "./log",
-    "line_log_format": re.compile(
+    "LINE_LOG_FORMAT": re.compile(
         r"""(?P<ipaddress>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) (?P<remote_user>(-|\S+))  - \[(?P<dateandtime>\d{2}\/[a-z]{3}\/\d{4}:\d{2}:\d{2}:\d{2} (\+|\-)\d{4})\] (\"(GET|POST) )(?P<url>.+)(http\/[1-2]\.[0-9]") (?P<statuscode>\d{3}) (?P<bytessent>\d+) (?P<refferer>-|"([^"]+)") (["](?P<useragent>[^"]+)["]) (?P<forwarded_for>"([^"]+)") (?P<request_id>"([^"]+)") (?P<rb_user>"([^"]+)") (?P<request_time>\d+\.\d{3})""",
         re.IGNORECASE),
-    "parsing_error_limit_perc": 10,
-    "progress_inform_mode": 1,
-    "logs_report_path": str(Path('logs_report') / "py_log.log"),
-    # "logs_report_path": None,
+    "PARSING_ERROR_LIMIT_PERC": 10,
+    "PROGRESS_INFORM_MODE": 1,
+    "LOGS_REPORT_PATH": str(Path('logs_report') / "py_log.log"),
+    # "LOGS_REPORT_PATH": None,
 }
 # обновляем дефолтный конфиг контентом из подгруженного
 config.update(loaded_config)
 
-'''
-To Do List:       
-    - Написать MVP тестов (fast mode)
-'''
-
 # Параметры логирования
-logging.basicConfig(filename=config.get('logs_report_path', None),
+logging.basicConfig(filename=config.get('LOGS_REPORT_PATH', None),
                     # if filename == None -> logs in stdout
                     filemode="w",
                     format='[%(asctime)s] %(levelname).1s %(message)s',
@@ -163,7 +159,7 @@ def parsing_logs(path_log_file, config_file):
     for row_bytes in logfile:
         row_str = row_bytes.decode('utf-8')
 
-        data = re.search(config_file['line_log_format'], row_str)
+        data = re.search(config_file['LINE_LOG_FORMAT'], row_str)
         if data:
             status_counters['success_count'] += 1
             datadict = data.groupdict()
@@ -174,7 +170,7 @@ def parsing_logs(path_log_file, config_file):
             parsing_logger.error(f'Parsing error for row: {row_str}')
 
         # progress inform
-        if config_file['progress_inform_mode']:
+        if config_file['PROGRESS_INFORM_MODE']:
             done_perc = ((status_counters['success_count'] + status_counters['fail_count']) / num_lines) * 100
             progress_inform(done_perc, done_perc_flags)
 
@@ -225,9 +221,9 @@ def get_formatted_report(table_json, config_file):
 
 
 @log_time(logger=parsing_logger)
-def save_report(table_json, file_time) -> None:
+def save_report(table_json, file_time, config_file) -> None:
     # Получаем шаблон
-    path_report_base_file = str(Path('reports') / 'report.html')
+    path_report_base_file = str(Path(config_file['REPORT_DIR']) / 'report.html')
     with open(path_report_base_file, 'r') as f:
         report_base_content = f.read()
 
@@ -236,7 +232,7 @@ def save_report(table_json, file_time) -> None:
     report_new = default_template.safe_substitute({'table_json': table_json})
 
     # Сохраняем report
-    path_report_base_file = str(Path('reports') / f'report-{file_time}.html')
+    path_report_base_file = str(Path(config_file['REPORT_DIR']) / f'report-{file_time}.html')
     with open(path_report_base_file, 'w') as f:
         f.write(report_new)
 
@@ -244,7 +240,7 @@ def save_report(table_json, file_time) -> None:
 def get_fatal_error_status(status_counters, config_file):
     all_rows_count = status_counters['success_count'] + status_counters['fail_count']
     fail_perc = (status_counters['fail_count'] / all_rows_count) * 100
-    limit = config_file['parsing_error_limit_perc']
+    limit = config_file['PARSING_ERROR_LIMIT_PERC']
     if fail_perc > limit:
         parsing_logger.error(f'Error limit is over, {fail_perc} > {limit}')
         return Status.failed
@@ -262,6 +258,7 @@ def main(config_file):
     path_log_file = str(Path(config_file['LOG_DIR']) / log_file_name_last)
     urls_list, requests_time_list, status_counters = parsing_logs(path_log_file, config_file)
 
+    # В случае превышения ошибок при парсинге поднимаем SystemError
     status = get_fatal_error_status(status_counters, config_file)
     if status == Status.failed:
         parsing_logger.error(f'Program is stopped due to fatal error!')
@@ -278,7 +275,7 @@ def main(config_file):
     table_json = get_formatted_report(table_json, config_file)
 
     # Сохранение отчёта
-    save_report(table_json, file_time)
+    save_report(table_json, file_time, config_file)
 
 
 if __name__ == "__main__":
