@@ -67,8 +67,11 @@ config = {
 config.update(loaded_config)
 
 # Параметры логирования
+log_filename = config.get("LOGS_REPORT_PATH", None)
+if log_filename:
+    os.makedirs(os.path.dirname(log_filename), exist_ok=True)
 logging.basicConfig(
-    filename=config.get("LOGS_REPORT_PATH", None),
+    filename=log_filename,
     # if filename == None -> logs in stdout
     filemode="w",
     format="[%(asctime)s] %(levelname).1s %(message)s",
@@ -198,9 +201,9 @@ def parsing_logs(path_log_file, config_file):
         # progress inform
         if config_file["PROGRESS_INFORM_MODE"]:
             done_perc = (
-                (status_counters["success_count"] + status_counters["fail_count"])
-                / num_lines
-            ) * 100
+                                (status_counters["success_count"] + status_counters["fail_count"])
+                                / num_lines
+                        ) * 100
             progress_inform(done_perc, done_perc_flags)
 
     logfile.close()
