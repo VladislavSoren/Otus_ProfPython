@@ -1,14 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import math
 import os
 import gzip
 import sys
 import glob
 import logging
 import collections
+import threading
 import time
 from functools import wraps
 from optparse import OptionParser
+from threading import Thread
+
 # brew install protobuf
 # protoc  --python_out=. ./appsinstalled.proto
 # pip install protobuf
@@ -29,6 +33,24 @@ logging.basicConfig(filename="log_memc_load.log",
 parsing_logger = logging.getLogger(__name__)
 
 
+class threadsafe_iter:
+    """Takes an iterator/generator and makes it thread-safe by
+    serializing call to the `next` method of given iterator/generator.
+    """
+
+    def __init__(self, it):
+        self.it = it
+        # self.lock = threading.Lock()
+        self.lock = threading.RLock()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        with self.lock:
+            return self.it.__next__()
+
+
 # Функция декоратор замера времени выполнения функции
 def log_time(logger, description=''):
     def inner(func):
@@ -38,7 +60,7 @@ def log_time(logger, description=''):
             logger.info(f'Start parsing {description} ({func.__name__})')
             result = func(*args, **kwargs)
             end = time.time()
-            exec_time = round(end - start, 5)
+            exec_time = round(end - start, 10)
             logger.info(f'Parsing time {description} ({func.__name__}): {exec_time}s')
             return result
 
@@ -57,6 +79,7 @@ def dot_rename(path):
     # os.rename(path, os.path.join(head, "." + fn))
 
 
+# @log_time(logger=parsing_logger, description='<insert_appsinstalled>')
 def insert_appsinstalled(connection, appsinstalled, dry_run=False):
     ua = appsinstalled_pb2.UserApps()
     ua.lat = appsinstalled.lat
@@ -68,21 +91,16 @@ def insert_appsinstalled(connection, appsinstalled, dry_run=False):
         if dry_run:
             logging.debug("%s - %s -> %s" % (str(connection.server), key, str(ua).replace("\n", " ")))
         else:
-            connection.set(key, packed)
-            # memc.close()
-            # memc.quit()
-            # memc.shutdown()
-            # del memc
+            resp = connection.set(key, packed)
     except Exception as e:
         logging.exception("Cannot write to memc %s: %s" % (connection.server, e))
         return False
-    finally:
-        pass
-    return True
+    else:
+        return True
 
 
+# @log_time(logger=parsing_logger, description='<parse_appsinstalled>')
 def parse_appsinstalled(line):
-    # line_parts = line.strip().split("\t")
     line_parts = line.decode().strip().split("\t")
     if len(line_parts) < 5:
         return
@@ -98,10 +116,11 @@ def parse_appsinstalled(line):
         lat, lon = float(lat), float(lon)
     except ValueError:
         logging.info("Invalid geo coords: `%s`" % line)
+
     return AppsInstalled(dev_type, dev_id, lat, lon, apps)
 
 
-@log_time(logger=parsing_logger, description='<memc_load>')
+@log_time(logger=parsing_logger, description='<memc_load_multi>')
 def main(options):
     connections_memc = {
         "idfa": RetryingClient(
@@ -126,46 +145,84 @@ def main(options):
             retry_for=[MemcacheUnexpectedCloseError]),
     }
 
+    workers = options.workers
+
     for fn in glob.iglob(options.pattern):
 
-        processed = errors = 0
         logging.info('Processing %s' % fn)
+
         fd = gzip.open(fn)
+        fd_safe_iter = threadsafe_iter(fd)
 
-        count = 0
-        for line in fd:
-            count += 1
+        def save_in_mem_cache(bot_i):
 
-            # if count > 2000:
-            #     break
+            errors = 0
+            processed = 0
 
-            line = line.strip()
-            if not line:
-                continue
-            appsinstalled = parse_appsinstalled(line)
-            if not appsinstalled:
-                errors += 1
-                continue
-            connection = connections_memc.get(appsinstalled.dev_type)
-            if not connection:
-                errors += 1
-                logging.error("Unknow device type: %s" % appsinstalled.dev_type)
-                continue
-            ok = insert_appsinstalled(connection, appsinstalled, options.dry)
-            if ok:
-                processed += 1
+            while True:
+
+                try:
+                    line = next(fd_safe_iter)
+                except StopIteration as e:
+                    logging.error(f"Error: {e}")
+                    break
+                else:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    appsinstalled = parse_appsinstalled(line)
+
+                    if not appsinstalled:
+                        errors += 1
+
+                    connection = connections_memc.get(appsinstalled.dev_type)
+
+                    if not connection:
+                        errors += 1
+                        logging.error("Unknow device type: %s" % appsinstalled.dev_type)
+
+                    ok = insert_appsinstalled(connection, appsinstalled, options.dry)
+                    if ok:
+                        processed += 1
+                    else:
+                        errors += 1
+
+            err_rate = float(errors) / processed
+            if err_rate < NORMAL_ERR_RATE:
+                logging.info("Acceptable error rate (%s). Successfull load" % err_rate)
             else:
-                errors += 1
-        if not processed:
-            fd.close()
-            dot_rename(fn)
-            continue
+                logging.error("High error rate (%s > %s). Failed load" % (err_rate, NORMAL_ERR_RATE))
 
-        err_rate = float(errors) / processed
-        if err_rate < NORMAL_ERR_RATE:
-            logging.info("Acceptable error rate (%s). Successfull load" % err_rate)
-        else:
-            logging.error("High error rate (%s > %s). Failed load" % (err_rate, NORMAL_ERR_RATE))
+        # Потоки
+        # Формирование группы потоков
+        Threads_VK = [
+            Thread(target=save_in_mem_cache, args=(
+                bot_i,)) for bot_i in range(workers)
+        ]
+
+        # .........Запускаем потоки (начинаем нормализацию).........
+        for t in Threads_VK:
+            t.start()
+
+        # Проверяем живы ли потоки
+        for t in Threads_VK:
+            if t.is_alive():
+                logging.info(f'Thread №{t} ALIVE')
+            else:
+                logging.info(f'Thread №{t} DEAD')
+
+        # .................Ждём завершения всех потоков
+        for t in Threads_VK:
+            t.join()
+
+        # .................Проверяем завершение всех потоков
+        for t in Threads_VK:
+            if t.is_alive():
+                logging.info(f'Thread №{t} ALIVE')
+            else:
+                logging.info(f'Thread №{t} DEAD')
+
         fd.close()
         dot_rename(fn)
 
@@ -192,10 +249,11 @@ if __name__ == '__main__':
     op.add_option("-l", "--log", action="store", default=None)
     op.add_option("--dry", action="store_true", default=False)
     op.add_option("--pattern", action="store", default="./data/appsinstalled/*.tsv.gz")
-    op.add_option("--idfa", action="store", default="127.0.0.1:11211")
-    op.add_option("--gaid", action="store", default="127.0.0.1:11212")
-    op.add_option("--adid", action="store", default="127.0.0.1:11213")
-    op.add_option("--dvid", action="store", default="127.0.0.1:11214")
+    op.add_option("--idfa", action="store", default="127.0.0.1:11215")
+    op.add_option("--gaid", action="store", default="127.0.0.1:11216")
+    op.add_option("--adid", action="store", default="127.0.0.1:11217")
+    op.add_option("--dvid", action="store", default="127.0.0.1:11218")
+    op.add_option("--workers", action="store", default=2)
     (opts, args) = op.parse_args()
     logging.basicConfig(filename=opts.log, level=logging.INFO if not opts.dry else logging.DEBUG,
                         format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
