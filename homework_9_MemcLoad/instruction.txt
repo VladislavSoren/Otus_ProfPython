@@ -1,0 +1,25 @@
+
+Start mem servers:
+memcached -p 11211 -d
+memcached -p 11212 -d
+memcached -p 11213 -d
+memcached -p 11214 -d
+
+Start mem servers with bash:
+bash start_processes_by_ports.sh 11211 11212 11213 11214 11215 11216 11217 11218
+
+Find started processes:
+netstat -ntlp | grep 112
+
+Kil processes:
+sudo kill -9 <PID1>
+sudo kill -9 <PID2>
+sudo kill -9 <PID3>
+sudo kill -9 <PID4>
+
+Kil processes by ports:
+bash kill_processes_by_port.sh 11211 11212 11213 11214
+
+bash kill_processes_by_port.sh 11215 11216 11217 11218
+
+bash kill_processes_by_port.sh 11211 11212 11213 11214 11215 11216 11217 11218
