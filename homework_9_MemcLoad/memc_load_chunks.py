@@ -214,6 +214,12 @@ def main(options):
                     [len(failed_keys_idfa), len(failed_keys_gaid), len(failed_keys_adid), len(failed_keys_dvid)])
                 processed += count
 
+                # zeroing out chunk_dicts for new data
+                chunk_dicts[options.idfa_name] = {}
+                chunk_dicts[options.gaid_name] = {}
+                chunk_dicts[options.adid_name] = {}
+                chunk_dicts[options.dvid_name] = {}
+
                 # zeroing out count then we reach chunk_size
                 count = 0
         else:
