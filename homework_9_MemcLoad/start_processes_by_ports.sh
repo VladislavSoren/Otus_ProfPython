@@ -9,7 +9,7 @@ fi
 # Перебираем каждый порт и запускаем Memcached сервер
 for port in "$@"; do
     echo "Starting Memcached server on port $port..."
-    memcached -p "$port" -d
+    memcached -p "$port" -d -vv >> "/home/soren/Projects/Otus_ProfPython/homework_9_MemcLoad/$port.log" 2>&1
     echo "Memcached server started on port $port."
 done
 
