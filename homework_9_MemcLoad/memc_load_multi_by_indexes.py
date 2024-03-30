@@ -150,29 +150,6 @@ def main(options):
 
         def save_in_mem_cache(bot_i, df_worker):
 
-            # connections_memc = {
-            #     "idfa": RetryingClient(
-            #         Client(options.idfa, connect_timeout=3, timeout=1),
-            #         attempts=3,
-            #         retry_delay=0.01,
-            #         retry_for=[MemcacheUnexpectedCloseError]),
-            #     "gaid": RetryingClient(
-            #         Client(options.gaid, connect_timeout=3, timeout=1),
-            #         attempts=3,
-            #         retry_delay=0.01,
-            #         retry_for=[MemcacheUnexpectedCloseError]),
-            #     "adid": RetryingClient(
-            #         Client(options.adid, connect_timeout=3, timeout=1),
-            #         attempts=3,
-            #         retry_delay=0.01,
-            #         retry_for=[MemcacheUnexpectedCloseError]),
-            #     "dvid": RetryingClient(
-            #         Client(options.dvid, connect_timeout=3, timeout=1),
-            #         attempts=3,
-            #         retry_delay=0.01,
-            #         retry_for=[MemcacheUnexpectedCloseError]),
-            # }
-
             errors = 0
             processed = 0
 
