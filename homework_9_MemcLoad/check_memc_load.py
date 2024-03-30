@@ -1,28 +1,27 @@
 from pymemcache.client.base import Client
 
+# 100
+keys_check = [
+    'idfa:26658aeb53c5c03222c631843cdd7332',
+    'idfa:e7e1a50c0ec2747ca56cd9e1558c0d7c',
+    'dvid:7f88207fd495875f6c6e701e82dd7f73',
+    'gaid:be18f8dd478dfc308bd9537d3cf64f6f',
+    'adid:9bee278471a5eb9de39f0e44ffa7fd09',
+    'gaid:3bb9d849a4626860f58c4da2086f7412',
+]
+
+# 100k
+keys_check_100k = [
+    'gaid:9875b2f670a2eb6920f72039162937a0',
+    'dvid:f6491509523d4a57cf1e16461ac0c11d',
+    'adid:f38c2729f83d81914227bb25619f1ab0',
+    'idfa:b608692d7647d2a8e1d21e0b494ae534',
+    'gaid:d138f08a3bad4ab21bde418a598a59d9',
+    'adid:81718802cc9ec3740c86e643b9fd0722',
+]
+
 
 def main(check):
-
-    # 100
-    keys_check = [
-        'idfa:26658aeb53c5c03222c631843cdd7332',
-        'idfa:e7e1a50c0ec2747ca56cd9e1558c0d7c',
-        'dvid:7f88207fd495875f6c6e701e82dd7f73',
-        'gaid:be18f8dd478dfc308bd9537d3cf64f6f',
-        'adid:9bee278471a5eb9de39f0e44ffa7fd09',
-        'gaid:3bb9d849a4626860f58c4da2086f7412',
-    ]
-
-    # 100k
-    keys_check_100k = [
-        'gaid:9875b2f670a2eb6920f72039162937a0',
-        'dvid:f6491509523d4a57cf1e16461ac0c11d',
-        'adid:f38c2729f83d81914227bb25619f1ab0',
-        'idfa:b608692d7647d2a8e1d21e0b494ae534',
-        'gaid:d138f08a3bad4ab21bde418a598a59d9',
-        'adid:81718802cc9ec3740c86e643b9fd0722',
-    ]
-
     if check == "100k":
         keys_check.extend(keys_check_100k)
 
