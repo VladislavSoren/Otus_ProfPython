@@ -4,17 +4,11 @@ import os
 import gzip
 import sys
 import glob
-import logging
 import collections
 import time
 from functools import wraps
 from optparse import OptionParser
-# brew install protobuf
-# protoc  --python_out=. ./appsinstalled.proto
-# pip install protobuf
 import appsinstalled_pb2
-# pip install python-memcached
-# import memcache
 from pymemcache.client.base import Client
 from pymemcache.client.retrying import RetryingClient
 from pymemcache.exceptions import MemcacheUnexpectedCloseError
@@ -54,7 +48,7 @@ AppsInstalled = collections.namedtuple("AppsInstalled", ["dev_type", "dev_id", "
 def dot_rename(path):
     head, fn = os.path.split(path)
     # atomic in most cases
-    # os.rename(path, os.path.join(head, "." + fn))
+    os.rename(path, os.path.join(head, "." + fn))
 
 
 def insert_appsinstalled(connection, appsinstalled, dry_run=False):
@@ -69,6 +63,7 @@ def insert_appsinstalled(connection, appsinstalled, dry_run=False):
             logging.debug("%s - %s -> %s" % (str(connection.server), key, str(ua).replace("\n", " ")))
         else:
             connection.set(key, packed)
+            # time.sleep(0.005)
             # memc.close()
             # memc.quit()
             # memc.shutdown()

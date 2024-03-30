@@ -4,17 +4,11 @@ import os
 import gzip
 import sys
 import glob
-import logging
 import collections
 import time
 from functools import wraps
 from optparse import OptionParser
-# brew install protobuf
-# protoc  --python_out=. ./appsinstalled.proto
-# pip install protobuf
 import appsinstalled_pb2
-# pip install python-memcached
-# import memcache
 from pymemcache.client.base import Client
 from pymemcache.client.retrying import RetryingClient
 from pymemcache.exceptions import MemcacheUnexpectedCloseError
@@ -54,32 +48,7 @@ AppsInstalled = collections.namedtuple("AppsInstalled", ["dev_type", "dev_id", "
 def dot_rename(path):
     head, fn = os.path.split(path)
     # atomic in most cases
-    # os.rename(path, os.path.join(head, "." + fn))
-
-
-def insert_appsinstalled(connection, appsinstalled, dry_run=False):
-    ua = appsinstalled_pb2.UserApps()
-    ua.lat = appsinstalled.lat
-    ua.lon = appsinstalled.lon
-    key = "%s:%s" % (appsinstalled.dev_type, appsinstalled.dev_id)
-    ua.apps.extend(appsinstalled.apps)
-    packed = ua.SerializeToString()
-    try:
-        if dry_run:
-            logging.debug("%s - %s -> %s" % (str(connection.server), key, str(ua).replace("\n", " ")))
-        else:
-            connection.set(key, packed)
-            # time.sleep(0.005)
-            # memc.close()
-            # memc.quit()
-            # memc.shutdown()
-            # del memc
-    except Exception as e:
-        logging.exception("Cannot write to memc %s: %s" % (connection.server, e))
-        return False
-    finally:
-        pass
-    return True
+    os.rename(path, os.path.join(head, "." + fn))
 
 
 def parse_appsinstalled(line):
@@ -230,6 +199,12 @@ def main(options):
                 [len(failed_keys_idfa), len(failed_keys_gaid), len(failed_keys_adid), len(failed_keys_dvid)])
             processed += count
 
+            # zeroing out chunk_dicts for new data
+            chunk_dicts[options.idfa_name] = {}
+            chunk_dicts[options.gaid_name] = {}
+            chunk_dicts[options.adid_name] = {}
+            chunk_dicts[options.dvid_name] = {}
+
             err_rate = float(errors) / processed
             if err_rate < NORMAL_ERR_RATE:
                 logging.info("Acceptable error rate (%s). Successfull load" % err_rate)
@@ -269,7 +244,7 @@ if __name__ == '__main__':
     op.add_option("--gaid", action="store", default="127.0.0.1:11212")
     op.add_option("--adid", action="store", default="127.0.0.1:11213")
     op.add_option("--dvid", action="store", default="127.0.0.1:11214")
-    op.add_option("--chunk_size", action="store", default=50)
+    op.add_option("--chunk_size", action="store", default=100)
     (opts, args) = op.parse_args()
     logging.basicConfig(filename=opts.log, level=logging.INFO if not opts.dry else logging.DEBUG,
                         format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')

@@ -40,11 +40,11 @@ def get_key_and_packed(appsinstalled):
 
 def main(check):
     if check == "all":
-        test_path = "./data/appsinstalled/*.tsv.gz"
+        test_path = "./data/appsinstalled/.*.tsv.gz"
     elif check == "100":
-        test_path = "./data/appsinstalled/*100.tsv.gz"
+        test_path = "./data/appsinstalled/.*100.tsv.gz"
     elif check == "100k":
-        test_path = "./data/appsinstalled/*100k.tsv.gz"
+        test_path = "./data/appsinstalled/.*100k.tsv.gz"
 
     # group1
     gr1_c1 = Client(('localhost', 11211))

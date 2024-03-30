@@ -5,21 +5,13 @@ import os
 import gzip
 import sys
 import glob
-import logging
 import collections
-import threading
 import time
 from functools import wraps
 from multiprocessing import Pool
 from optparse import OptionParser
-from threading import Thread
 
-# brew install protobuf
-# protoc  --python_out=. ./appsinstalled.proto
-# pip install protobuf
 import appsinstalled_pb2
-# pip install python-memcached
-# import memcache
 from pymemcache.client.base import Client
 from pymemcache.client.retrying import RetryingClient
 from pymemcache.exceptions import MemcacheUnexpectedCloseError
@@ -59,7 +51,7 @@ AppsInstalled = collections.namedtuple("AppsInstalled", ["dev_type", "dev_id", "
 def dot_rename(path):
     head, fn = os.path.split(path)
     # atomic in most cases
-    # os.rename(path, os.path.join(head, "." + fn))
+    os.rename(path, os.path.join(head, "." + fn))
 
 
 # @log_time(logger=parsing_logger, description='<parse_appsinstalled>')
@@ -131,27 +123,26 @@ def load_data_for_all_servers(options, connections_memc, chunk_dicts):
 def save_in_mem_cache(fd, options):
     connections_memc = {
         "idfa": RetryingClient(
-            Client(options.idfa, connect_timeout=3, timeout=1),
-            attempts=3,
-            retry_delay=0.01,
+            Client(options.idfa, connect_timeout=5, timeout=10),
+            attempts=10,
+            retry_delay=0.05,
             retry_for=[MemcacheUnexpectedCloseError]),
         "gaid": RetryingClient(
-            Client(options.gaid, connect_timeout=3, timeout=1),
-            attempts=3,
-            retry_delay=0.01,
+            Client(options.gaid, connect_timeout=5, timeout=10),
+            attempts=10,
+            retry_delay=0.05,
             retry_for=[MemcacheUnexpectedCloseError]),
         "adid": RetryingClient(
-            Client(options.adid, connect_timeout=3, timeout=1),
-            attempts=3,
-            retry_delay=0.01,
+            Client(options.adid, connect_timeout=5, timeout=10),
+            attempts=10,
+            retry_delay=0.05,
             retry_for=[MemcacheUnexpectedCloseError]),
         "dvid": RetryingClient(
-            Client(options.dvid, connect_timeout=3, timeout=1),
-            attempts=3,
-            retry_delay=0.01,
+            Client(options.dvid, connect_timeout=5, timeout=10),
+            attempts=10,
+            retry_delay=0.05,
             retry_for=[MemcacheUnexpectedCloseError]),
     }
-
 
     chunk_dicts = {
         options.idfa_name: {},
@@ -173,11 +164,11 @@ def save_in_mem_cache(fd, options):
         if not appsinstalled:
             errors += 1
             continue
-        # connection = connections_memc.get(appsinstalled.dev_type)
-        # if not connection:
-        #     errors += 1
-        #     logging.error("Unknow device type: %s" % appsinstalled.dev_type)
-        #     continue
+        connection = connections_memc.get(appsinstalled.dev_type)
+        if not connection:
+            errors += 1
+            logging.error("Unknow device type: %s" % appsinstalled.dev_type)
+            continue
 
         key, packed = get_key_and_packed(appsinstalled)
 
@@ -227,13 +218,12 @@ def save_in_mem_cache(fd, options):
 
     return err_rate
 
+
 @log_time(logger=parsing_logger, description='<memc_load_multi>')
 def main(options):
-
     workers_number = options.workers
 
     for fn in glob.iglob(options.pattern):
-
         logging.info('Processing %s' % fn)
 
         fd = gzip.open(fn)
@@ -249,6 +239,7 @@ def main(options):
             l1 = [(fd_w, options) for fd_w in fds]
             print(p.starmap(save_in_mem_cache, l1))
 
+        # Close and rename file
         fd.close()
         dot_rename(fn)
 
