@@ -23,3 +23,5 @@ bash kill_processes_by_port.sh 11211 11212 11213 11214
 bash kill_processes_by_port.sh 11215 11216 11217 11218
 
 bash kill_processes_by_port.sh 11211 11212 11213 11214 11215 11216 11217 11218
+
+bash delete_files.sh 11211.log 11212.log 11213.log 11214.log 11215.log 11216.log 11217.log 11218.log
