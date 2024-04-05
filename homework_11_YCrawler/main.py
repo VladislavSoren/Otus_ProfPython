@@ -2,6 +2,9 @@ import os
 import re
 import argparse
 import asyncio
+import time
+from functools import wraps
+
 import aiofiles
 import aiohttp
 from bs4 import BeautifulSoup
@@ -18,6 +21,24 @@ logger = logging.getLogger(__name__)
 BASE_URL = 'https://news.ycombinator.com/'
 
 GLOB_PATH = Path(__file__).parent.resolve()
+
+
+# Функция декоратор замера времени выполнения функции
+def log_time(logger, description=''):
+    def inner(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            logger.info(f'Start parsing {description} ({func.__name__})')
+            result = func(*args, **kwargs)
+            end = time.time()
+            exec_time = round(end - start, 5)
+            logger.info(f'Parsing time {description} ({func.__name__}): {exec_time}s')
+            return result
+
+        return wrapper
+
+    return inner
 
 
 async def get_start_page_html():
@@ -65,7 +86,7 @@ async def fetch_link(session, semaphore, url, timeout, retry_interval, max_retry
                 async with session.get(url, timeout=timeout) as response:
                     text = await response.text()
                     if "Sorry, we're not able to serve your requests this quickly." in text:
-                        print(f"Received 'Sorry' message. Retrying...")
+                        logger.info(f"Received 'Sorry' message. Retrying...")
                         await asyncio.sleep(retry_interval)
                         retry_count += 1
                         if retry_count > max_retry_count:
@@ -103,20 +124,20 @@ async def fetch_comment_link(session, semaphore, url_main, url, timeout, retry_i
             try:
                 async with session.get(url, timeout=timeout) as response:
                     if response.status == 403:
-                        print(f"Forbidden on: {url}")
+                        logger.info(f"Forbidden on: {url}")
                         return f"Forbidden on: {url}"
                     elif response.content_type != "text/html":
-                        print(f"Content_type on: {url}")
+                        logger.info(f"Content_type on: {url}")
                         return f"Content_type on: {url}"
                     else:
                         try:
                             text = await response.text()
                         except Exception as e:
-                            print(e)
+                            logger.info(e)
                             return e
 
                         if "Sorry, we're not able to serve your requests this quickly." in text:
-                            print(f"Received 'Sorry' message. Retrying...")
+                            logger.info(f"Received 'Sorry' message. Retrying...")
                             await asyncio.sleep(retry_interval)
                             retry_count += 1
                             if retry_count > max_retry_count:
@@ -147,6 +168,8 @@ def parse_arguments():
     -d - аргумент для указания папки для сохранения страниц,
     -t - аргумент для указания количества секунд между запусками обкачки."""
     parser = argparse.ArgumentParser()
+    parser.add_argument('--only_one', type=int, help='Флаг единичного запуска',
+                        default=1)
     parser.add_argument('--parse_dir', type=str, help='Директория для парсинга',
                         default="downloads")
     parser.add_argument('--parse_pause', type=int,
@@ -195,8 +218,16 @@ async def main():
         if tasks:
             responses = await asyncio.gather(*tasks)
 
+        if parser.only_one == 1:
+            break
+
         await asyncio.sleep(parse_pause)
 
 
 if __name__ == "__main__":
+    start = time.time()
+    logger.info('Start parsing')
     asyncio.run(main())
+    end = time.time()
+    exec_time = round(end - start, 5)
+    logger.info(f'Parsing time: {exec_time}s')
