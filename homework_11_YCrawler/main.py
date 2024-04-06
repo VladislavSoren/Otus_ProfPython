@@ -85,15 +85,15 @@ async def fetch_link(session, semaphore, url, timeout, retry_interval, max_retry
             try:
                 async with session.get(url, timeout=timeout) as response:
                     text = await response.text()
-                    if "Sorry, we're not able to serve your requests this quickly." in text:
-                        logger.info(f"Received 'Sorry' message. Retrying...")
+
+                    # if status is not in 200 group
+                    if str(response.status)[0] != "2":
+                        logger.info(f"Status: {response.status}, reason: {response.reason}. For url - {url}")
                         await asyncio.sleep(retry_interval)
                         retry_count += 1
                         if retry_count > max_retry_count:
                             return f"Retry limit reached for {url}"
                         continue
-                    if "Timeout occurred while fetching" in text:
-                        pass
                     return text
             except asyncio.TimeoutError:
                 return f"Timeout occurred while fetching {url}"
@@ -136,8 +136,8 @@ async def fetch_comment_link(session, semaphore, url_main, url, timeout, retry_i
                             logger.info(e)
                             return e
 
-                        if "Sorry, we're not able to serve your requests this quickly." in text:
-                            logger.info(f"Received 'Sorry' message. Retrying...")
+                        if str(response.status)[0] != "2":
+                            logger.info(f"Status: {response.status}, reason: {response.reason}. For url - {url}")
                             await asyncio.sleep(retry_interval)
                             retry_count += 1
                             if retry_count > max_retry_count:
