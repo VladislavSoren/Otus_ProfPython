@@ -1,0 +1,15 @@
+# Use postgres/example user/password credentials
+version: "3.9"
+
+services:
+  web:
+    # build Dockerfile from root dir
+    build: .
+    # run server
+    command: python /app/manage.py runserver 0.0.0.0:80
+    volumes:
+      - .:/code
+    env_file:
+      - ./.env
+    ports:
+      - 8000:80
