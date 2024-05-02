@@ -48,7 +48,7 @@ AppsInstalled = collections.namedtuple("AppsInstalled", ["dev_type", "dev_id", "
 def dot_rename(path):
     head, fn = os.path.split(path)
     # atomic in most cases
-    os.rename(path, os.path.join(head, "." + fn))
+    # os.rename(path, os.path.join(head, "." + fn))
 
 
 def insert_appsinstalled(connection, appsinstalled, dry_run=False):
@@ -63,11 +63,6 @@ def insert_appsinstalled(connection, appsinstalled, dry_run=False):
             logging.debug("%s - %s -> %s" % (str(connection.server), key, str(ua).replace("\n", " ")))
         else:
             connection.set(key, packed)
-            # time.sleep(0.005)
-            # memc.close()
-            # memc.quit()
-            # memc.shutdown()
-            # del memc
     except Exception as e:
         logging.exception("Cannot write to memc %s: %s" % (connection.server, e))
         return False
