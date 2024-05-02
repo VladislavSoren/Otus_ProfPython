@@ -4,8 +4,6 @@ from .models import UserBase, Question, Tags, Reply, MTMQuestionRating, MTMReply
 from .widgets import ModifiedClearableFileInput
 
 
-# CHOISES_TAGS = [(x['id'], x['tag']) for x in Tags.objects.all().values('id', 'tag')]
-
 class RegisterForm(UserCreationForm):
     """Форма регистрации. Связана с представлением RegisterView."""
     username = forms.CharField(widget=forms.TextInput(attrs={'class': 'form-control'}), label='Login', max_length=40)
